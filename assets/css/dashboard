@@ -1,1 +1,205 @@
 
+// Industrial AI Safety Dashboard
+// Proprietary Software - classicseo.com
+// All Rights Reserved
+
+// Data Models
+let alerts = [
+    { id: 'a1', time: '14:02:23', type: 'Fire & Smoke', zone: 'Warehouse Zone 4', severity: 'critical', msg: 'Pinpoint smoke detected near chemical storage', camera: 'CAM-18', acked: false },
+    { id: 'a2', time: '13:58:12', type: 'PPE Violation', zone: 'Loading Bay', severity: 'high', msg: 'Safety Helmet missing (worker ID: W-109)', camera: 'CAM-07', acked: false },
+    { id: 'a3', time: '13:51:07', type: 'Unsafe Behavior', zone: 'Aisle 3', severity: 'high', msg: 'Running on stairs detected', camera: 'CAM-12', acked: false },
+    { id: 'a4', time: '13:44:33', type: 'HSE', zone: 'Forklift Lane', severity: 'high', msg: 'Unsafe vehicle proximity (forklift & worker)', camera: 'CAM-03', acked: false },
+    { id: 'a5', time: '13:30:02', type: 'Access Control', zone: 'Server Room', severity: 'critical', msg: 'Stranger in secure premises - unauthorized face', camera: 'CAM-22', acked: false }
+];
+
+let ppeWorkers = [
+    { id: 'W001', helmet: true, goggles: true, jacket: true, gloves: true, belt: false, trousers: true, shoes: true, score: '6/7' },
+    { id: 'W002', helmet: true, goggles: false, jacket: true, gloves: true, belt: true, trousers: true, shoes: true, score: '6/7' },
+    { id: 'W003', helmet: false, goggles: false, jacket: true, gloves: false, belt: false, trousers: true, shoes: true, score: '3/7' },
+    { id: 'W004', helmet: true, goggles: true, jacket: true, gloves: true, belt: true, trousers: true, shoes: true, score: '7/7' }
+];
+
+let accessLog = [
+    { name: 'John Miller', time: '14:05:22', door: 'Main Entrance', result: 'GRANTED' },
+    { name: 'Unknown', time: '13:59:10', door: 'R&D Lab', result: 'DENIED (Stranger)' },
+    { name: 'Sarah Chen', time: '13:45:03', door: 'Warehouse', result: 'GRANTED' }
+];
+
+let scadaMetrics = {
+    boilerTemp: { val: 88, unit: '°C', warn: 95, crit: 105 },
+    pumpRPM: { val: 1430, unit: 'RPM', warn: 1800, crit: 2200 },
+    tankLevel: { val: 72, unit: '%', warn: 85, crit: 94 },
+    pressure: { val: 3.2, unit: 'bar', warn: 4.5, crit: 5.0 },
+    motorTemp: { val: 82, unit: '°C', warn: 90, crit: 110 },
+    conveyorSpeed: { val: 2.1, unit: 'm/s', warn: 2.8, crit: 3.5 }
+};
+
+let machineEvents = [{ time: '14:00:22', metric: 'Pressure', msg: 'Pressure normalizing', severity: 'info' }];
+let emergencyActive = false;
+let moduleToggles = { hse: true, ppe: true, unsafe: true, fire: true, access: true, production: true, staff: true };
+
+function updateKPIs() {
+    const activeCameras = 126, totalCameras = 128;
+    const criticalAlerts = alerts.filter(a => a.severity === 'critical' && !a.acked).length;
+    const highAlerts = alerts.filter(a => a.severity === 'high' && !a.acked).length;
+    const ackedToday = alerts.filter(a => a.acked).length;
+    const ppeCompliance = Math.round((ppeWorkers.filter(w=>w.score === '7/7').length / ppeWorkers.length)*100);
+    document.getElementById('kpiContainer').innerHTML = `
+        <div class="kpi-card"><div class="kpi-title">Active Cameras</div><div class="kpi-value">${activeCameras}/${totalCameras}</div><div class="kpi-sub">2 offline, check network</div></div>
+        <div class="kpi-card"><div class="kpi-title">Critical Alerts</div><div class="kpi-value" style="color:#ff5c75">${criticalAlerts}</div><div class="kpi-sub">Unacknowledged</div></div>
+        <div class="kpi-card"><div class="kpi-title">High Alerts</div><div class="kpi-value" style="color:#ffb020">${highAlerts}</div><div class="kpi-sub">Require action</div></div>
+        <div class="kpi-card"><div class="kpi-title">Ack'd Today</div><div class="kpi-value">${ackedToday}</div><div class="kpi-sub">Response KPI</div></div>
+        <div class="kpi-card"><div class="kpi-title">PPE Compliance</div><div class="kpi-value">${ppeCompliance}%</div><div class="kpi-sub">Site average</div></div>
+    `;
+}
+
+function renderAlertFeed() {
+    const unacked = alerts.filter(a => !a.acked).slice(0, 5);
+    const feedHtml = unacked.map(alert => `
+        <div class="alert-item severity-${alert.severity}" style="border-left-color: ${alert.severity==='critical'?'#ff5c75':alert.severity==='high'?'#ffb020':'#3aa0ff'}">
+            <div style="display:flex; justify-content:space-between;"><strong>${alert.type}</strong> <span>${alert.time}</span></div>
+            <div style="font-size:12px; margin:6px 0;">${alert.msg} · ${alert.zone} (${alert.camera})</div>
+            <button class="ack-btn" data-id="${alert.id}">Acknowledge</button>
+        </div>
+    `).join('');
+    document.getElementById('alertFeedList').innerHTML = unacked.length ? feedHtml : '<div class="muted" style="padding:12px;">✅ All clear, no active alerts.</div>';
+    document.querySelectorAll('.ack-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const id = btn.getAttribute('data-id');
+            const alertObj = alerts.find(a => a.id === id);
+            if(alertObj) alertObj.acked = true;
+            updateAllUI();
+        });
+    });
+}
+
+function renderAlertsTable() {
+    const tableHtml = `<table class="matrix-table"><thead><tr><th>Time</th><th>Type</th><th>Zone</th><th>Severity</th><th>Status</th><th></th></tr></thead><tbody>
+        ${alerts.map(alert => `<tr><td>${alert.time}</td><td>${alert.type}</td><td>${alert.zone}</td><td><span style="color:${alert.severity==='critical'?'#ff5c75':alert.severity==='high'?'#ffb020':'#3aa0ff'}">${alert.severity.toUpperCase()}</span></td><td>${alert.acked ? 'Acknowledged' : 'Active'}</td>
+        <td>${!alert.acked ? `<button class="ack-btn-small" data-id="${alert.id}" style="background:#1e2f4a; border:none; padding:4px 12px; border-radius:40px; cursor:pointer;">ACK</button>` : '—'}</td></tr>`).join('')}
+    </tbody></table>`;
+    document.getElementById('alertsTableContainer').innerHTML = tableHtml;
+    document.querySelectorAll('.ack-btn-small').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const id = btn.getAttribute('data-id');
+            const a = alerts.find(al => al.id === id);
+            if(a) a.acked = true;
+            renderAlertsTable(); updateKPIs(); renderAlertFeed();
+        });
+    });
+}
+
+function renderPPEMatrix() {
+    const items = ['Helmet','Goggles','Jacket','Gloves','Belt','Trousers','Shoes'];
+    let html = `<table class="matrix-table"><thead><tr><th>Worker ID</th>${items.map(i=>`<th>${i}</th>`).join('')}<th>Score</th></tr></thead><tbody>`;
+    ppeWorkers.forEach(w => {
+        html += `<tr><td>${w.id}</td>
+        <td>${w.helmet ? '✓' : '✗'}</td><td>${w.goggles ? '✓' : '✗'}</td><td>${w.jacket ? '✓' : '✗'}</td>
+        <td>${w.gloves ? '✓' : '✗'}</td><td>${w.belt ? '✓' : '✗'}</td><td>${w.trousers ? '✓' : '✗'}</td><td>${w.shoes ? '✓' : '✗'}</td>
+        <td>${w.score}</td></tr>`;
+    });
+    html += `</tbody></table><div class="muted" style="margin-top:12px;">⚠️ Safety jacket compliance 92% · Helmet compliance 75%</div>`;
+    document.getElementById('ppeMatrixContent').innerHTML = html;
+}
+
+function renderFaceAccess() {
+    const logHtml = accessLog.map(log => `<div style="padding:8px; border-bottom:1px solid #25344f;"><span>${log.time}</span> <strong>${log.name}</strong> · ${log.door} · <span style="color:${log.result==='GRANTED'?'#28c76f':'#ff5c75'}">${log.result}</span></div>`).join('');
+    document.getElementById('accessLogList').innerHTML = logHtml;
+    document.getElementById('scanFaceBtn').onclick = () => {
+        const search = document.getElementById('faceSearchInput').value;
+        const mockResult = search ? `✅ Employee: ${search} (Authorized Level 2) · Expression: Calm · Age: Adult · Mask: No · Glasses: Yes · Access GRANTED` : `⚠️ STRANGER DETECTED: Unregistered face. Access DENIED. Security alert generated.`;
+        document.getElementById('faceResultCard').innerHTML = `<div style="background:#07112a; border-radius:20px; padding:16px;"><i class="fas fa-id-card"></i> ${mockResult}</div>`;
+        if(!search) alerts.push({ id: 'new'+Date.now(), time: new Date().toLocaleTimeString(), type: 'Stranger Alert', zone: 'Face Reader', severity: 'high', msg: 'Unregistered person at access point', camera: 'FaceCam', acked: false });
+        updateAllUI();
+    };
+}
+
+function renderSCADA() {
+    let gaugesHtml = '';
+    for(let [key, m] of Object.entries(scadaMetrics)) {
+        let percent = Math.min(100, (m.val/m.warn)*100);
+        let barColor = m.val >= m.crit ? 'red' : (m.val >= m.warn ? '#ffb020' : '#28c76f');
+        gaugesHtml += `<div><div>${key.replace(/([A-Z])/g, ' $1')}</div><div style="font-size:24px; font-weight:700;">${m.val}${m.unit}</div><div style="height:6px; background:#2f405f; border-radius:4px;"><div style="width:${percent}%; height:6px; background:${barColor}; border-radius:4px;"></div></div><div class="muted">Warning: ${m.warn}${m.unit}</div></div>`;
+    }
+    document.getElementById('scadaGauges').innerHTML = gaugesHtml;
+    document.getElementById('machineEventLog').innerHTML = machineEvents.map(e => `<div>⏱️ ${e.time} · ${e.metric} · ${e.msg}</div>`).join('');
+}
+
+function renderLiveCameras() {
+    const cams = [
+        { name: 'Gate A', status: 'online', features: 'ANPR' },
+        { name: 'Forklift Lane', status: 'online', features: 'Speed+Prox' },
+        { name: 'Machine Room', status: 'online', features: 'SCADA Sync' },
+        { name: 'Storage Zone', status: 'offline', features: 'Needs Check' }
+    ];
+    const html = cams.map(c => `<div class="cam-feed"><div class="cam-header"><span><span class="${c.status === 'online' ? 'online-dot' : 'offline-dot'}"></span> ${c.name}</span><span>${c.status === 'online' ? 'ONLINE' : 'OFFLINE'}</span></div><div class="cam-placeholder"><i class="fas fa-camera" style="font-size:28px;"></i> ${c.status === 'online' ? 'Live AI Stream' : 'No Signal'}<br><span style="font-size:10px;">${c.features}</span></div></div>`).join('');
+    document.getElementById('liveCamerasGrid').innerHTML = html;
+    const fullCams = [...cams, {name:'Assembly B', status:'online', features:'PPE'}, {name:'Warehouse C', status:'online', features:'Fire/Smoke'}, {name:'Admin Block', status:'online', features:'Staff Monitor'}, {name:'Parking', status:'online', features:'Vehicle'}];
+    document.getElementById('fullCamGrid').innerHTML = fullCams.map(c => `<div class="cam-feed"><div class="cam-header"><span><span class="${c.status === 'online' ? 'online-dot' : 'offline-dot'}"></span> ${c.name}</span></div><div class="cam-placeholder"><i class="fas fa-video"></i> ${c.status === 'online' ? 'Live View' : 'Offline'}</div></div>`).join('');
+}
+
+function renderModuleStatus() {
+    const modules = ['HSE','PPE','Unsafe Behavior','Fire & Safety','Access Control','Production SCADA','Staff Monitoring'];
+    const togglesKeys = ['hse','ppe','unsafe','fire','access','production','staff'];
+    const statusHtml = modules.map((mod, idx) => `<div style="background:#0f172b; border-radius: 20px; padding:12px 24px;"><i class="fas fa-${idx===3?'fire':idx===0?'hard-hat':idx===1?'user-shield':'microchip'}"></i> ${mod}<br><span style="color:${moduleToggles[togglesKeys[idx]] ? '#28c76f' : '#ff5c75'}">${moduleToggles[togglesKeys[idx]] ? 'ACTIVE' : 'DISABLED'}</span></div>`).join('');
+    document.getElementById('moduleStatusGrid').innerHTML = statusHtml;
+}
+
+function renderSettings() {
+    const togglesHtml = Object.keys(moduleToggles).map(key => `
+        <label style="display:flex; align-items:center; gap:10px;"><span>${key.toUpperCase()}</span>
+        <input type="checkbox" ${moduleToggles[key] ? 'checked' : ''} data-mod="${key}" class="module-toggle"></label>
+    `).join('');
+    document.getElementById('settingsToggles').innerHTML = togglesHtml;
+    document.querySelectorAll('.module-toggle').forEach(cb => {
+        cb.addEventListener('change', (e) => { moduleToggles[e.target.dataset.mod] = e.target.checked; renderModuleStatus(); });
+    });
+}
+
+function updateAllUI() {
+    updateKPIs();
+    renderAlertFeed();
+    renderAlertsTable();
+    renderPPEMatrix();
+    renderLiveCameras();
+    renderModuleStatus();
+    renderFaceAccess();
+    renderSCADA();
+    renderSettings();
+}
+
+function emergencyToggle() {
+    emergencyActive = !emergencyActive;
+    const btn = document.getElementById('emergencyBtn');
+    if(emergencyActive) {
+        btn.classList.add('active');
+        btn.innerHTML = '<i class="fas fa-skull-crosswalk"></i> DEACTIVATE EMERGENCY';
+        alerts.unshift({ id: 'emerg'+Date.now(), time: new Date().toLocaleTimeString(), type:'EMERGENCY MODE', zone:'Facility Wide', severity:'critical', msg:'Manual emergency override - all exits unlocked, sprinklers armed', camera:'SYSTEM', acked:false });
+        updateAllUI();
+    } else {
+        btn.classList.remove('active');
+        btn.innerHTML = '<i class="fas fa-bell"></i> EMERGENCY MODE';
+    }
+}
+
+// Initialize dashboard
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active-pane'));
+        const tabId = btn.getAttribute('data-tab');
+        document.getElementById(tabId).classList.add('active-pane');
+    });
+});
+
+document.getElementById('clearAllAlertsBtn')?.addEventListener('click', () => { alerts = alerts.filter(a => a.acked); updateAllUI(); });
+document.getElementById('emergencyBtn').addEventListener('click', emergencyToggle);
+setInterval(() => { document.getElementById('liveClock').innerText = new Date().toLocaleTimeString(); }, 1000);
+setInterval(() => {
+    scadaMetrics.pressure.val = +(scadaMetrics.pressure.val + (Math.random()*0.2 - 0.1)).toFixed(1);
+    if(scadaMetrics.pressure.val > 5.0) alerts.push({ id: 'scada'+Date.now(), time: new Date().toLocaleTimeString(), type:'SCADA Critical', zone:'Production', severity:'critical', msg:'Pressure exceeded 5 bar!', camera:'PLC-01', acked:false });
+    renderSCADA(); updateKPIs();
+}, 8000);
+
+updateAllUI();
