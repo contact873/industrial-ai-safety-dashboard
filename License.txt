@@ -1,0 +1,17 @@
+
+### 5. **LICENSE**
+```text
+CLASSICSEO.COM PROPRIETARY LICENSE
+
+Copyright (c) 2026 classicseo.com
+
+This software is the exclusive proprietary property of classicseo.com.
+All rights reserved.
+
+Unauthorized copying, modification, distribution, or use of this software,
+via any medium, is strictly prohibited without express written permission 
+from classicseo.com.
+
+This software is provided "AS IS" without warranty of any kind.
+
+For licensing inquiries, contact: legal@classicseo.com
